@@ -1,0 +1,66 @@
+{
+  "id": "lead_nurture",
+  "name": "Lead Nurture Sequence",
+  "description": "Read new CRM leads, generate personalised nurture emails per lead, queue outreach, update lead status to nurturing, track.",
+  "tags": ["nurture", "email", "leads", "crm", "pipeline"],
+  "steps": [
+    {
+      "type": "plugin",
+      "name": "crm_reader",
+      "input": { "collection": "leads", "status": "new", "min_score": 5, "limit": 30 },
+      "label": "Read new qualified leads from CRM"
+    },
+    {
+      "type": "branch",
+      "label": "Skip if no leads",
+      "condition": { "field": "count", "op": "gt", "value": 0 },
+      "then": [
+        {
+          "type": "llm",
+          "prompt": "You are a nurture copywriter for Bridge AI. For each lead in this list, write a personalised nurture email subject and 3-sentence body. The email should reference their company and intent. Return a JSON array: [{name, email, company, score, hook, subject, body}]. Leads: {{records}}",
+          "system": "Return ONLY a valid JSON array. No markdown. Just the array.",
+          "label": "Generate personalised nurture emails",
+          "max_tokens": 1500
+        },
+        {
+          "type": "plugin",
+          "name": "email_sender",
+          "input": {
+            "to": "nurture-queue@bridge.ai",
+            "subject": "Nurture batch ready",
+            "body": "Personalised nurture emails generated and ready to dispatch."
+          },
+          "label": "Queue nurture batch",
+          "required": false
+        },
+        {
+          "type": "plugin",
+          "name": "crm_writer",
+          "input": {
+            "collection": "leads_nurturing",
+            "records": "{{_prev}}"
+          },
+          "label": "Write nurturing leads to CRM"
+        },
+        {
+          "type": "notify",
+          "message": "Nurture sequence triggered for new leads batch. Emails queued.",
+          "label": "Slack: nurture started"
+        }
+      ],
+      "else": [
+        {
+          "type": "notify",
+          "message": "Nurture workflow ran — no new qualified leads found. Nothing to process.",
+          "label": "Slack: no leads"
+        }
+      ]
+    },
+    {
+      "type": "plugin",
+      "name": "metrics_reporter",
+      "input": { "event": "nurture_run", "properties": { "source": "lead_nurture_workflow" } },
+      "label": "Track nurture run"
+    }
+  ]
+}

@@ -142,19 +142,71 @@ async function data_transformer(input, ctx) {
 // ─── CRM WRITER ───────────────────────────────────────────────────────────────
 
 async function crm_writer(input, ctx) {
-  const { collection = "leads" } = input;
-  // Accept explicit record, or fall back to entire input (minus collection key)
-  const { collection: _c, ...rest } = input;
-  const record = input.record || (Object.keys(rest).length ? rest : null);
-  if (!record) return { ok: false, error: "crm_writer requires record", plugin: "crm_writer" };
+  const { collection = "leads", record, records } = input;
 
   const dbPath = path.resolve(__dirname, `../data/${collection}.jsonl`);
-  const entry  = JSON.stringify({ ...record, _id: Date.now(), _ts: new Date().toISOString(), _skill: ctx?.id });
+
+  // Batch write: records[] array takes priority
+  if (Array.isArray(records) && records.length) {
+    let written = 0;
+    for (const r of records) {
+      const entry = JSON.stringify({ ...r, _id: Date.now() + written, _ts: new Date().toISOString(), _skill: ctx?.id, _collection: collection });
+      fs.appendFileSync(dbPath, entry + "\n");
+      written++;
+    }
+    const total = fs.readFileSync(dbPath, "utf8").split("\n").filter(Boolean).length;
+    return { ok: true, plugin: "crm_writer", collection, written, total };
+  }
+
+  // Single record: explicit record field takes priority over raw input
+  const RESERVED = new Set(["collection", "record", "records", "_prev", "ok", "plugin", "note", "skill"]);
+  const clean = record || Object.fromEntries(
+    Object.entries(input).filter(([k]) => !RESERVED.has(k) && !k.startsWith("_"))
+  );
+
+  if (!Object.keys(clean).length) {
+    return { ok: false, error: "crm_writer requires record or records", plugin: "crm_writer" };
+  }
+
+  const entry = JSON.stringify({ ...clean, _id: Date.now(), _ts: new Date().toISOString(), _skill: ctx?.id, _collection: collection });
   fs.appendFileSync(dbPath, entry + "\n");
 
-  // Count records
-  const lines = fs.readFileSync(dbPath, "utf8").split("\n").filter(Boolean).length;
-  return { ok: true, plugin: "crm_writer", collection, id: JSON.parse(entry)._id, total: lines };
+  const total = fs.readFileSync(dbPath, "utf8").split("\n").filter(Boolean).length;
+  return { ok: true, plugin: "crm_writer", collection, id: JSON.parse(entry)._id, total };
+}
+
+// ─── CRM READER ───────────────────────────────────────────────────────────────
+
+async function crm_reader(input, ctx) {
+  const { collection = "leads", limit = 50, filter, status, min_score } = input;
+
+  const dbPath = path.resolve(__dirname, `../data/${collection}.jsonl`);
+  if (!fs.existsSync(dbPath)) {
+    return { ok: true, plugin: "crm_reader", collection, records: [], count: 0 };
+  }
+
+  let records = fs.readFileSync(dbPath, "utf8")
+    .split("\n").filter(Boolean)
+    .map(l => { try { return JSON.parse(l); } catch { return null; } })
+    .filter(r => r && r._collection !== undefined ? r._collection === collection : true);
+
+  // Filter: status field (e.g. "new", "nurturing", "closing", "closed")
+  if (status) records = records.filter(r => r.status === status);
+
+  // Filter: minimum lead score
+  if (min_score !== undefined) records = records.filter(r => (r.score ?? 0) >= min_score);
+
+  // Arbitrary key=value filter
+  if (filter && typeof filter === "object") {
+    Object.entries(filter).forEach(([k, v]) => {
+      records = records.filter(r => r[k] === v);
+    });
+  }
+
+  // Most recent first, capped at limit
+  records = records.slice(-Math.min(limit, 200));
+
+  return { ok: true, plugin: "crm_reader", collection, records, count: records.length };
 }
 
 // ─── LLM GENERATOR ───────────────────────────────────────────────────────────
@@ -252,6 +304,7 @@ export const PLUGINS = {
   slack_notifier,
   data_transformer,
   crm_writer,
+  crm_reader,
   llm_generator,
   payment_trigger,
   metrics_reporter,

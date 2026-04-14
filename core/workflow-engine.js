@@ -254,7 +254,11 @@ export class WorkflowEngine extends EventEmitter {
   }
 
   _interpolate(template, context) {
-    return template.replace(/\{\{(\w+)\}\}/g, (_, k) => context[k] ?? `{{${k}}}`);
+    return template.replace(/\{\{(\w+)\}\}/g, (_, k) => {
+      const val = context[k];
+      if (val === undefined) return `{{${k}}}`;
+      return typeof val === "object" ? JSON.stringify(val, null, 2) : String(val);
+    });
   }
 
   // ─── QUERY ────────────────────────────────────────────────────────────────

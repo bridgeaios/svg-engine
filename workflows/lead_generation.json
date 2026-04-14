@@ -1,8 +1,8 @@
 {
   "id": "lead_generation",
-  "name": "Lead Generation → Outreach → Close Loop",
-  "description": "Scrape leads, enrich, score, send outreach, notify team, log to CRM.",
-  "tags": ["leads", "outreach", "revenue", "high-value"],
+  "name": "Lead Generation → Score → CRM → Outreach",
+  "description": "Scrape leads, normalize, LLM-score + extract structured records, write clean records to CRM, send batch outreach summary, notify team, track metrics.",
+  "tags": ["leads", "outreach", "revenue", "high-value", "crm"],
   "steps": [
     {
       "type": "skill",
@@ -17,31 +17,40 @@
     },
     {
       "type": "llm",
-      "prompt": "Score these leads 1-10 and add a one-line outreach hook for each. Input: {{_prev}}",
-      "label": "Score + personalize"
-    },
-    {
-      "type": "skill",
-      "name": "ban:email-systems",
-      "input": { "to": "{{lead_email}}", "subject": "Quick question about your business", "operation": "send_sequence" },
-      "label": "Queue outreach emails",
-      "required": false
+      "prompt": "You are a B2B lead scoring assistant for Bridge AI. Given these scraped leads, return a JSON array of lead objects. Each object must have: name (string), email (string or null), company (string), score (1-10 integer), hook (one-line personalized outreach opener), intent (string), status (always 'new'). Leads data: {{_prev}}",
+      "system": "Return ONLY a valid JSON array. No markdown. No explanation. Just the array.",
+      "label": "LLM score + extract structured leads",
+      "max_tokens": 1000
     },
     {
       "type": "plugin",
       "name": "crm_writer",
-      "input": { "collection": "leads" },
-      "label": "Write leads to CRM"
+      "input": {
+        "collection": "leads",
+        "records": "{{_prev}}"
+      },
+      "label": "Write scored leads to CRM"
+    },
+    {
+      "type": "plugin",
+      "name": "email_sender",
+      "input": {
+        "to": "sales@bridge.ai",
+        "subject": "New leads batch ready — {{count}} leads scored",
+        "body": "Lead generation complete. New leads have been scored and written to CRM. Top leads ready for nurture sequence."
+      },
+      "label": "Notify sales team of new batch",
+      "required": false
     },
     {
       "type": "notify",
-      "message": "Lead generation complete. New leads queued for outreach.",
+      "message": "Lead generation complete. {{count}} leads written to CRM and queued for nurture.",
       "label": "Notify team on Slack"
     },
     {
       "type": "plugin",
       "name": "metrics_reporter",
-      "input": { "event": "lead_generation_run" },
+      "input": { "event": "lead_generation_run", "properties": { "source": "lead_generation_workflow" } },
       "label": "Track metrics"
     }
   ]

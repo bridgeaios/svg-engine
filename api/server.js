@@ -255,6 +255,34 @@ app.get("/workflows/:id/runs", (req, res) => {
   res.json({ ok: true, workflow: req.params.id, runs, count: runs.length });
 });
 
+// ─── CRM ROUTES ───────────────────────────────────────────────────────────────
+
+app.get("/crm/:collection", async (req, res) => {
+  try {
+    const { status, min_score, limit = "50", filter } = req.query;
+    const input = {
+      collection: req.params.collection,
+      limit:      parseInt(limit, 10),
+      ...(status    && { status }),
+      ...(min_score && { min_score: parseFloat(min_score) }),
+      ...(filter    && { filter: JSON.parse(filter) }),
+    };
+    const result = await runPlugin("crm_reader", input, { id: "crm_reader" });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/crm/:collection", async (req, res) => {
+  try {
+    const result = await runPlugin("crm_writer", { collection: req.params.collection, ...req.body }, { id: "crm_writer" });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ─── PLUGIN ROUTES ────────────────────────────────────────────────────────────
 
 app.get("/plugins", (req, res) => {

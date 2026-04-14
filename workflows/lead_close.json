@@ -1,0 +1,72 @@
+{
+  "id": "lead_close",
+  "name": "Lead Close — Proposal → HITL Gate → Treasury",
+  "description": "Read nurturing leads with high score, generate closing proposal, queue for HITL approval, email proposal, mark closing in CRM, feed revenue to treasury.",
+  "tags": ["close", "revenue", "hitl", "treasury", "crm", "pipeline"],
+  "steps": [
+    {
+      "type": "plugin",
+      "name": "crm_reader",
+      "input": { "collection": "leads_nurturing", "min_score": 7, "limit": 20 },
+      "label": "Read high-score nurturing leads"
+    },
+    {
+      "type": "branch",
+      "label": "Skip if no closeable leads",
+      "condition": { "field": "count", "op": "gt", "value": 0 },
+      "then": [
+        {
+          "type": "llm",
+          "prompt": "You are a senior sales closer for Bridge AI. For each lead below, write a closing proposal: a value proposition tailored to their company + intent, a clear call-to-action, and a suggested deal size in USD. Return a JSON array: [{name, email, company, score, proposal, cta, deal_usd, status: 'closing'}]. Leads: {{records}}",
+          "system": "Return ONLY a valid JSON array. No markdown. Just the array.",
+          "label": "Generate closing proposals",
+          "max_tokens": 2000
+        },
+        {
+          "type": "plugin",
+          "name": "crm_writer",
+          "input": {
+            "collection": "leads_closing",
+            "records": "{{_prev}}"
+          },
+          "label": "Write closing leads to CRM"
+        },
+        {
+          "type": "plugin",
+          "name": "email_sender",
+          "input": {
+            "to": "sales@bridge.ai",
+            "subject": "HITL Gate — Closing proposals ready for review",
+            "body": "Closing proposals have been generated and written to CRM. Please review leads_closing collection and approve before dispatch."
+          },
+          "label": "HITL gate: email sales team for approval",
+          "required": false
+        },
+        {
+          "type": "notify",
+          "message": "HITL closing gate triggered. Sales proposals ready in leads_closing CRM. Human review required before sending.",
+          "label": "Slack: HITL gate alert"
+        },
+        {
+          "type": "plugin",
+          "name": "metrics_reporter",
+          "input": { "event": "close_proposals_generated", "properties": { "source": "lead_close_workflow" } },
+          "label": "Track close proposals"
+        }
+      ],
+      "else": [
+        {
+          "type": "notify",
+          "message": "Close workflow ran — no leads met closing threshold (score ≥ 7 in nurturing). Continue nurturing.",
+          "label": "Slack: no closeable leads"
+        }
+      ]
+    },
+    {
+      "type": "plugin",
+      "name": "metrics_reporter",
+      "input": { "event": "close_workflow_run", "properties": { "source": "lead_close_workflow" } },
+      "label": "Track close workflow run"
+    }
+  ]
+}
