@@ -57,7 +57,13 @@ export class SVGEngine {
     for (const fileUrl of localFiles) {
       try {
         const mod   = await import(fileUrl);
-        const skill = mod.default || mod.skill;
+        let skill = mod.default || mod.skill;
+        // Support named-export skills (e.g. export const id, export function run)
+        if (!skill?.id && mod.id) {
+          skill = { id: mod.id, name: mod.name, description: mod.description,
+                    tags: mod.tags, version: mod.version, steps: mod.steps,
+                    run: mod.run, visualize: mod.visualize };
+        }
         if (skill?.id) {
           this.skills.set(skill.id, { ...skill, _source: "local", _loadedAt: Date.now() });
         }
@@ -176,7 +182,8 @@ export class SVGEngine {
     const latencies = recent.map(e => e.ms);
     const p50 = latencies.length ? sorted(latencies)[Math.floor(latencies.length * 0.5)] : 0;
     const p95 = latencies.length ? sorted(latencies)[Math.floor(latencies.length * 0.95)] : 0;
-    return { total_executions: this._execLog.length, svg_builds: this._teachLog.length, p50_ms: p50, p95_ms: p95, skills_loaded: this.skills.size };
+    return { total_executions: this._execLog.length, svg_builds: this._teachLog.length,
+             p50_ms: p50, p95_ms: p95, latency_p50_ms: p50, latency_p95_ms: p95, skills_loaded: this.skills.size };
   }
 
   // ─── PRIVATE ─────────────────────────────────────────────────────────────────
